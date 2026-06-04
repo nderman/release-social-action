@@ -23,7 +23,7 @@ export const BUFFER_GRAPHQL_ENDPOINT = 'https://api.buffer.com/graphql';
 // Enum values (`automatic`, `addToQueue`) are inlined as GraphQL enum literals.
 // Only the scalar values travel as typed variables, so we never depend on the
 // exact name of the input object type.
-export const CREATE_POST_MUTATION = `mutation CreatePost($channelId: String!, $text: String!) {
+export const CREATE_POST_MUTATION = `mutation CreatePost($channelId: ChannelId!, $text: String!) {
   createPost(
     input: { channelId: $channelId, text: $text, schedulingType: automatic, mode: addToQueue }
   ) {
