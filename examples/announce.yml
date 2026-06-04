@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Schedule social posts
-        uses: your-org/release-social-action@v1
+        uses: nderman/release-social-action@v1
         id: social
         with:
           buffer_api_key: ${{ secrets.BUFFER_API_KEY }}

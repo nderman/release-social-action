@@ -83,6 +83,23 @@ describe('BufferClient', () => {
     expect(sent.query).toContain('mode: addToQueue');
   });
 
+  it('feeds response headers into the rate limiter', async () => {
+    const limiter = fastLimiter();
+    const spy = jest.spyOn(limiter, 'observe');
+    const http: HttpClient = async () => ({
+      status: 200,
+      headers: { 'ratelimit-remaining': '88', 'ratelimit-reset': '300' },
+      body: { data: { createPost: { __typename: 'PostActionSuccess', post: { id: 'p' } } } }
+    });
+    const client = new BufferClient({ apiKey: 'k', http, limiter });
+
+    await client.enqueueToChannel('c', 't');
+    expect(spy).toHaveBeenCalledWith({
+      'ratelimit-remaining': '88',
+      'ratelimit-reset': '300'
+    });
+  });
+
   it('fans out one request per channel', async () => {
     const seen: string[] = [];
     const http: HttpClient = async (req) => {

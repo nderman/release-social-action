@@ -189,6 +189,13 @@ header).
   reacting after a 429.
 - A conservative default `maxRequests = 90` (a 10% safety margin under 100) over
   `windowMs = 15 * 60 * 1000`. Both overridable for tests.
+- **Server-header self-correction:** `observe(headers)` reads the IETF
+  `RateLimit-Remaining` / `RateLimit-Reset` (delta-seconds) headers Buffer
+  returns on every response. When the remaining budget is exhausted, admission
+  is paused until the server-reported reset — so the limiter corrects from
+  Buffer's truth rather than relying solely on the static window. The Buffer
+  client calls `observe()` after each response. Absent/non-numeric headers are
+  ignored, leaving the static window as the floor.
 - **Retry with backoff:** `withRetry()` wraps a request thunk. It retries on:
   - HTTP `429` **or** an HTTP-200 GraphQL rate-limit error — honoring the
     `retryAfter` extension (seconds) when present, else a `Retry-After` header,

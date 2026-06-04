@@ -47,7 +47,7 @@ jobs:
   announce:
     runs-on: ubuntu-latest
     steps:
-      - uses: your-org/release-social-action@v1
+      - uses: nderman/release-social-action@v1
         with:
           buffer_api_key: ${{ secrets.BUFFER_API_KEY }}
           channel_ids: ${{ vars.BUFFER_CHANNEL_IDS }}   # comma/newline separated

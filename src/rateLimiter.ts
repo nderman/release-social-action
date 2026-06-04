@@ -31,6 +31,8 @@ export class RateLimiter {
   private readonly clock: Clock;
   private timestamps: number[] = [];
   private chain: Promise<void> = Promise.resolve();
+  /** When >0, admission is paused until this timestamp (server-imposed). */
+  private pausedUntil = 0;
 
   constructor(opts: RateLimiterOptions = {}) {
     this.maxRequests = opts.maxRequests ?? 90;
@@ -47,11 +49,33 @@ export class RateLimiter {
     return fn();
   }
 
+  /**
+   * Self-correct from the server's truth. Reads the IETF `RateLimit-Remaining`
+   * and `RateLimit-Reset` (delta-seconds until the window resets) headers; if
+   * the remaining budget is exhausted, pause admission until the reset. Header
+   * names are matched case-insensitively. Unknown/absent headers are ignored,
+   * so the static sliding window remains the floor.
+   */
+  observe(headers: Record<string, string>): void {
+    const remaining = numHeader(headers, 'ratelimit-remaining');
+    const resetSeconds = numHeader(headers, 'ratelimit-reset');
+    if (remaining !== undefined && remaining <= 0 && resetSeconds !== undefined) {
+      const until = this.clock.now() + Math.max(resetSeconds, 0) * 1000;
+      if (until > this.pausedUntil) this.pausedUntil = until;
+    }
+  }
+
   private async awaitSlot(): Promise<void> {
-    // Loop: prune, and if full, sleep until the oldest entry exits the window.
-    // Re-check after sleeping in case the clock/window moved.
+    // Loop: honor any server-imposed pause, then prune; if full, sleep until
+    // the oldest entry exits the window. Re-check after each sleep.
     // eslint-disable-next-line no-constant-condition
     while (true) {
+      const pauseRemaining = this.pausedUntil - this.clock.now();
+      if (pauseRemaining > 0) {
+        await this.clock.sleep(pauseRemaining + 1);
+        continue;
+      }
+
       this.prune();
       if (this.timestamps.length < this.maxRequests) {
         this.timestamps.push(this.clock.now());
@@ -67,6 +91,17 @@ export class RateLimiter {
     const cutoff = this.clock.now() - this.windowMs;
     this.timestamps = this.timestamps.filter((t) => t > cutoff);
   }
+}
+
+function numHeader(
+  headers: Record<string, string>,
+  name: string
+): number | undefined {
+  // Headers from http.ts are already lower-cased, but match defensively.
+  const raw = headers[name] ?? headers[name.toLowerCase()];
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  return Number.isNaN(n) ? undefined : n;
 }
 
 // ---------------------------------------------------------------------------

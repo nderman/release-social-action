@@ -167,6 +167,10 @@ export class BufferClient {
       body: JSON.stringify(body)
     });
 
+    // Feed the server's RateLimit-* headers back into the pacer so it
+    // self-corrects from Buffer's truth rather than only the static window.
+    this.limiter.observe(res.headers);
+
     // Retryable transport status (429/5xx), OR a GraphQL-level rate-limit signal
     // delivered on an HTTP 200. Either way, throw so withRetry can back off.
     const envelope = res.body as GraphQLEnvelope | undefined;

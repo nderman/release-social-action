@@ -54,6 +54,40 @@ describe('RateLimiter pacing', () => {
   });
 });
 
+describe('RateLimiter.observe (server-header self-correction)', () => {
+  it('pauses admission until reset when remaining hits 0', async () => {
+    const clock = virtualClock();
+    const limiter = new RateLimiter({ maxRequests: 100, windowMs: 999999, clock });
+
+    await limiter.schedule(async () => 'a'); // plenty of static budget left
+    expect(clock.sleeps).toHaveLength(0);
+
+    // Server says: budget exhausted, resets in 30s.
+    limiter.observe({ 'ratelimit-remaining': '0', 'ratelimit-reset': '30' });
+
+    await limiter.schedule(async () => 'b'); // must wait for the server reset
+    expect(clock.sleeps.length).toBeGreaterThanOrEqual(1);
+    expect(clock.sleeps[0]).toBeGreaterThanOrEqual(30000);
+  });
+
+  it('does not pause while remaining budget is left', async () => {
+    const clock = virtualClock();
+    const limiter = new RateLimiter({ maxRequests: 100, windowMs: 999999, clock });
+    limiter.observe({ 'ratelimit-remaining': '42', 'ratelimit-reset': '30' });
+    await limiter.schedule(async () => 'x');
+    expect(clock.sleeps).toHaveLength(0);
+  });
+
+  it('ignores absent or non-numeric headers', async () => {
+    const clock = virtualClock();
+    const limiter = new RateLimiter({ maxRequests: 100, windowMs: 999999, clock });
+    limiter.observe({});
+    limiter.observe({ 'ratelimit-remaining': 'nope', 'ratelimit-reset': 'soon' });
+    await limiter.schedule(async () => 'x');
+    expect(clock.sleeps).toHaveLength(0);
+  });
+});
+
 describe('withRetry', () => {
   it('retries 429 honoring Retry-After (ms)', async () => {
     const clock = virtualClock();
