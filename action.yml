@@ -24,8 +24,12 @@ inputs:
     description: 'Override the LLM model id. Defaults to a sensible model per provider.'
     required: false
     default: ''
+  post_text:
+    description: 'Exact post text to use verbatim. When set, skips the LLM/template summarizer entirely (escape hatch for hand-crafted copy).'
+    required: false
+    default: ''
   char_budget:
-    description: 'Maximum number of characters for the generated post.'
+    description: 'Maximum characters for the generated post. Ignored when post_text is supplied.'
     required: false
     default: '280'
   major_only:

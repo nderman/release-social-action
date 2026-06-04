@@ -46,6 +46,7 @@ export async function run(): Promise<void> {
   const anthropicKey = core.getInput('anthropic_api_key');
   const openaiKey = core.getInput('openai_api_key');
   const llmModel = core.getInput('llm_model');
+  const postTextOverride = core.getInput('post_text').trim();
   const charBudget = Number(core.getInput('char_budget') || '280');
   const majorOnly = (core.getInput('major_only') || 'true') !== 'false';
   const dryRun = (core.getInput('dry_run') || 'false') === 'true';
@@ -80,22 +81,28 @@ export async function run(): Promise<void> {
     charBudget: Number.isFinite(charBudget) ? charBudget : 280
   };
 
-  const provider = selectProvider(anthropicKey, openaiKey, llmModel);
   let postText: string;
-  if (provider) {
-    try {
-      core.info(`Summarizing release notes with ${provider.name}...`);
-      postText = await summarizeRelease(summarizeReq, provider);
-    } catch (err) {
-      // A dead key, no credits, or a rate limit shouldn't sink the run —
-      // degrade gracefully to the deterministic template summary.
-      const msg = err instanceof Error ? err.message : String(err);
-      core.warning(`LLM summarization failed (${msg}); using template fallback.`);
+  if (postTextOverride) {
+    // Escape hatch: use the supplied copy verbatim (no LLM, no budget clamp).
+    core.info('Using post_text override verbatim.');
+    postText = postTextOverride;
+  } else {
+    const provider = selectProvider(anthropicKey, openaiKey, llmModel);
+    if (provider) {
+      try {
+        core.info(`Summarizing release notes with ${provider.name}...`);
+        postText = await summarizeRelease(summarizeReq, provider);
+      } catch (err) {
+        // A dead key, no credits, or a rate limit shouldn't sink the run —
+        // degrade gracefully to the deterministic template summary.
+        const msg = err instanceof Error ? err.message : String(err);
+        core.warning(`LLM summarization failed (${msg}); using template fallback.`);
+        postText = clampToBudget(templateSummary(summarizeReq), summarizeReq.charBudget);
+      }
+    } else {
+      core.info('No LLM key provided — using the built-in template summary.');
       postText = clampToBudget(templateSummary(summarizeReq), summarizeReq.charBudget);
     }
-  } else {
-    core.info('No LLM key provided — using the built-in template summary.');
-    postText = clampToBudget(templateSummary(summarizeReq), summarizeReq.charBudget);
   }
   core.setOutput('post_text', postText);
   core.info(`Generated post (${postText.length} chars):\n${postText}`);
