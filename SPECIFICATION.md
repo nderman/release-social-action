@@ -114,9 +114,13 @@ The data flows strictly one direction:
   char budget on a word boundary as a safety net (the model is asked to comply,
   but we never trust it to).
 - Provider selection happens in `main.ts`: prefer Anthropic if
-  `anthropic_api_key` is set, else OpenAI if `openai_api_key` is set; error if
-  neither. Default models: Anthropic `claude-sonnet-4-6`, OpenAI `gpt-4o-mini`
-  (both overridable via `llm_model` input).
+  `anthropic_api_key` is set, else OpenAI if `openai_api_key` is set. Default
+  models: Anthropic `claude-sonnet-4-6`, OpenAI `gpt-4o-mini` (both overridable
+  via `llm_model` input).
+- **LLM is optional.** If neither key is supplied, `templateSummary()` builds a
+  deterministic post from the release title/notes/URL (no API call, no cost).
+  The LLM path is additionally wrapped so that a failed call (dead key, no
+  credits, rate limit) degrades to the same template rather than failing the run.
 - Concrete providers (`OpenAiProvider`, `AnthropicProvider`) lazily `import()`
   their SDK so the unused SDK never loads.
 

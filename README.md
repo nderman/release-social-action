@@ -21,6 +21,11 @@ the Buffer client takes its transport and rate-limiter by injection.
 
 - **Major detection** — posts only on `X.0.0` tags (toggle with `major_only`).
   Drafts, prereleases, and non-SemVer tags are skipped as a clean success.
+- **LLM optional** — if you set an OpenAI or Anthropic key, the post is
+  LLM-written. If you set **neither**, a built-in deterministic template builds
+  the post from the release title/notes/URL — no API cost. The LLM path also
+  falls back to the template if the API call fails (dead key, no credits, rate
+  limit), so a run never dies on the summarizer.
 - **Resilience** — a sliding-window pacer keeps you under Buffer's
   100-requests / 15-minutes limit (default 90 with margin), plus retry with
   exponential backoff + jitter on `429`/`5xx`, honoring `Retry-After`.

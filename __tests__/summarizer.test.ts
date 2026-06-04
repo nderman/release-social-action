@@ -1,7 +1,9 @@
 import {
   buildPrompt,
   clampToBudget,
-  summarizeRelease
+  firstHighlight,
+  summarizeRelease,
+  templateSummary
 } from '../src/summarizer';
 import { LlmProvider } from '../src/types';
 
@@ -46,6 +48,60 @@ describe('clampToBudget', () => {
   it('hard-cuts when no good word boundary exists', () => {
     const out = clampToBudget('supercalifragilisticexpialidocious', 10);
     expect(out.length).toBe(10);
+  });
+});
+
+describe('firstHighlight', () => {
+  it('skips headings/blanks and strips bullet markers', () => {
+    expect(firstHighlight('# Title\n\n- Rewrote the engine\n- More')).toBe(
+      'Rewrote the engine'
+    );
+  });
+
+  it('strips numbered list and quote markers', () => {
+    expect(firstHighlight('1. First thing')).toBe('First thing');
+    expect(firstHighlight('> quoted line')).toBe('quoted line');
+  });
+
+  it('returns empty string when there is no usable line', () => {
+    expect(firstHighlight('### only a heading')).toBe('');
+    expect(firstHighlight('')).toBe('');
+  });
+});
+
+describe('templateSummary (no-LLM fallback)', () => {
+  it('builds a post from the release fields', () => {
+    const out = templateSummary({
+      title: 'MyLib 2.0',
+      notes: '## Notes\n- Faster startup\n- New API',
+      url: 'https://x.test/2',
+      charBudget: 280
+    });
+    expect(out).toContain('MyLib 2.0 is out!');
+    expect(out).toContain('Faster startup');
+    expect(out).toContain('https://x.test/2');
+    expect(out).toContain('#release');
+  });
+
+  it('respects the character budget', () => {
+    const out = templateSummary({
+      title: 'X'.repeat(100),
+      notes: 'y '.repeat(100),
+      url: 'https://x.test/2',
+      charBudget: 80
+    });
+    expect(out.length).toBeLessThanOrEqual(80);
+  });
+
+  it('works with empty notes', () => {
+    const out = templateSummary({
+      title: 'Tool 3.0',
+      notes: '',
+      url: 'https://x.test/3',
+      charBudget: 280
+    });
+    expect(out).toContain('Tool 3.0 is out!');
+    expect(out).toContain('https://x.test/3');
   });
 });
 

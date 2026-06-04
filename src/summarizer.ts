@@ -49,6 +49,34 @@ export async function summarizeRelease(
   return clampToBudget(raw ?? '', req.charBudget);
 }
 
+/** First meaningful line of the notes, stripped of markdown noise. */
+export function firstHighlight(notes: string): string {
+  for (const raw of notes.split(/\r?\n/)) {
+    let line = raw.trim();
+    if (!line || line.startsWith('#')) continue; // skip blanks and headings
+    line = line
+      .replace(/^[-*+]\s+/, '') // bullet markers
+      .replace(/^\d+\.\s+/, '') // numbered list
+      .replace(/^>+\s*/, '') // block quotes
+      .trim();
+    if (line) return line;
+  }
+  return '';
+}
+
+/**
+ * Deterministic, no-API post builder used when no LLM key is configured.
+ * Produces a serviceable announcement from the release fields alone.
+ */
+export function templateSummary(req: SummarizeRequest): string {
+  const parts = [`🚀 ${req.title} is out!`];
+  const highlight = firstHighlight(req.notes);
+  if (highlight) parts.push(highlight);
+  if (req.url) parts.push(req.url);
+  parts.push('#release');
+  return clampToBudget(parts.join(' '), req.charBudget);
+}
+
 // ---------------------------------------------------------------------------
 // Concrete providers — each lazily imports its SDK so the unused one never
 // loads. Selected in main.ts based on which API key is present.
