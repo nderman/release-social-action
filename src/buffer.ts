@@ -181,16 +181,26 @@ export class BufferClient {
   }
 
   private normalize(channelId: string, res: HttpResponse): BufferPostResult {
-    if (res.status < 200 || res.status >= 300) {
-      return { channelId, ok: false, error: `HTTP ${res.status}` };
-    }
-
     const envelope = (res.body ?? {}) as GraphQLEnvelope;
+
+    // GraphQL errors can accompany various HTTP statuses; surface them first.
     if (envelope.errors && envelope.errors.length > 0) {
       return {
         channelId,
         ok: false,
         error: envelope.errors.map((e) => e.message ?? 'unknown').join('; ')
+      };
+    }
+
+    if (res.status < 200 || res.status >= 300) {
+      const detail =
+        typeof res.body === 'string'
+          ? res.body
+          : JSON.stringify(res.body ?? {});
+      return {
+        channelId,
+        ok: false,
+        error: `HTTP ${res.status}: ${detail.slice(0, 500)}`
       };
     }
 
