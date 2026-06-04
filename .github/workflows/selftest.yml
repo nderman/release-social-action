@@ -38,15 +38,22 @@ jobs:
 
       - name: Summary
         if: always()
+        env:
+          POSTED: ${{ steps.social.outputs.posted }}
+          SKIPPED: ${{ steps.social.outputs.skipped }}
+          REASON: ${{ steps.social.outputs.reason }}
+          POST_TEXT: ${{ steps.social.outputs.post_text }}
         run: |
           {
             echo "### Release Social Scheduler"
             echo ""
-            echo "- posted: \`${{ steps.social.outputs.posted }}\`"
-            echo "- skipped: \`${{ steps.social.outputs.skipped }}\`"
-            echo "- reason: ${{ steps.social.outputs.reason }}"
+            echo "- posted: \`$POSTED\`"
+            echo "- skipped: \`$SKIPPED\`"
+            echo "- reason: $REASON"
             echo ""
             echo "**Generated post:**"
             echo ""
-            echo '${{ steps.social.outputs.post_text }}'
+            echo '```text'
+            printf '%s\n' "$POST_TEXT"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
