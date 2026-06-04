@@ -32,6 +32,18 @@ inputs:
     description: 'Maximum characters for the generated post. Ignored when post_text is supplied.'
     required: false
     default: '280'
+  per_platform:
+    description: 'Resolve each channel''s platform and size the post per network (LinkedIn long-form, X short, etc.). Ignored when post_text is set.'
+    required: false
+    default: 'false'
+  schedule_mode:
+    description: 'How the post enters the schedule: addToQueue | shareNow | shareNext | customScheduled | recommendedTime.'
+    required: false
+    default: 'addToQueue'
+  due_at:
+    description: 'ISO-8601 timestamp for the post. Required when schedule_mode=customScheduled.'
+    required: false
+    default: ''
   major_only:
     description: 'Only post on major (X.0.0) releases.'
     required: false

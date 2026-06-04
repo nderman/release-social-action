@@ -9,13 +9,19 @@ import {
   AnthropicProvider,
   OpenAiProvider,
   clampToBudget,
+  platformCharBudget,
   summarizeRelease,
   templateSummary
 } from './summarizer';
-import { BufferClient } from './buffer';
+import { BufferClient, ScheduleOptions, ShareMode, SHARE_MODES } from './buffer';
 import { RateLimiter } from './rateLimiter';
 import { fetchHttpClient } from './http';
-import { BufferPostResult, LlmProvider, ReleaseLike } from './types';
+import {
+  BufferPostResult,
+  LlmProvider,
+  ReleaseLike,
+  SummarizeRequest
+} from './types';
 
 function parseChannelIds(raw: string): string[] {
   return raw
@@ -40,6 +46,16 @@ function selectProvider(
   return null;
 }
 
+function parseScheduleMode(raw: string): ShareMode {
+  const mode = (raw || 'addToQueue').trim() as ShareMode;
+  if (!SHARE_MODES.includes(mode)) {
+    throw new Error(
+      `Invalid schedule_mode "${raw}". Allowed: ${SHARE_MODES.join(', ')}.`
+    );
+  }
+  return mode;
+}
+
 export async function run(): Promise<void> {
   const bufferApiKey = core.getInput('buffer_api_key', { required: true });
   const channelIdsRaw = core.getInput('channel_ids', { required: true });
@@ -50,6 +66,9 @@ export async function run(): Promise<void> {
   const charBudget = Number(core.getInput('char_budget') || '280');
   const majorOnly = (core.getInput('major_only') || 'true') !== 'false';
   const dryRun = (core.getInput('dry_run') || 'false') === 'true';
+  const perPlatform = (core.getInput('per_platform') || 'false') === 'true';
+  const scheduleMode = parseScheduleMode(core.getInput('schedule_mode'));
+  const dueAt = core.getInput('due_at').trim();
 
   // Mask secrets in logs.
   for (const secret of [bufferApiKey, anthropicKey, openaiKey]) {
@@ -74,49 +93,42 @@ export async function run(): Promise<void> {
 
   core.info(decision.reason);
 
-  const summarizeReq = {
-    title: decision.release.title,
-    notes: decision.release.notes,
-    url: decision.release.url,
-    charBudget: Number.isFinite(charBudget) ? charBudget : 280
-  };
+  const baseBudget = Number.isFinite(charBudget) ? charBudget : 280;
+  const rel = decision.release;
+  const provider = postTextOverride
+    ? null
+    : selectProvider(anthropicKey, openaiKey, llmModel);
 
-  let postText: string;
-  if (postTextOverride) {
-    // Escape hatch: use the supplied copy verbatim (no LLM, no budget clamp).
-    core.info('Using post_text override verbatim.');
-    postText = postTextOverride;
-  } else {
-    const provider = selectProvider(anthropicKey, openaiKey, llmModel);
+  // Produce post copy for a given character budget: verbatim override →
+  // LLM (with template fallback on failure) → template. One place, reused
+  // per-channel when per-platform sizing is on.
+  const generate = async (budget: number): Promise<string> => {
+    if (postTextOverride) return postTextOverride;
+    const req: SummarizeRequest = {
+      title: rel.title,
+      notes: rel.notes,
+      url: rel.url,
+      charBudget: budget
+    };
     if (provider) {
       try {
-        core.info(`Summarizing release notes with ${provider.name}...`);
-        postText = await summarizeRelease(summarizeReq, provider);
+        return await summarizeRelease(req, provider);
       } catch (err) {
-        // A dead key, no credits, or a rate limit shouldn't sink the run —
-        // degrade gracefully to the deterministic template summary.
         const msg = err instanceof Error ? err.message : String(err);
         core.warning(`LLM summarization failed (${msg}); using template fallback.`);
-        postText = clampToBudget(templateSummary(summarizeReq), summarizeReq.charBudget);
+        return clampToBudget(templateSummary(req), budget);
       }
-    } else {
-      core.info('No LLM key provided — using the built-in template summary.');
-      postText = clampToBudget(templateSummary(summarizeReq), summarizeReq.charBudget);
     }
-  }
-  core.setOutput('post_text', postText);
-  core.info(`Generated post (${postText.length} chars):\n${postText}`);
+    return clampToBudget(templateSummary(req), budget);
+  };
+
+  if (postTextOverride) core.info('Using post_text override verbatim.');
+  else if (provider) core.info(`Summarizing release notes with ${provider.name}...`);
+  else core.info('No LLM key provided — using the built-in template summary.');
 
   const channelIds = parseChannelIds(channelIdsRaw);
   if (channelIds.length === 0) {
     throw new Error('No valid channel_ids provided.');
-  }
-
-  if (dryRun) {
-    core.info('dry_run=true — not calling Buffer.');
-    core.setOutput('skipped', 'false');
-    core.setOutput('reason', 'Dry run: post generated but not enqueued.');
-    return;
   }
 
   const limiter = new RateLimiter();
@@ -126,11 +138,39 @@ export async function run(): Promise<void> {
     limiter
   });
 
-  core.info(`Enqueuing to ${channelIds.length} channel(s)...`);
-  const results: BufferPostResult[] = await client.enqueueToChannels(
-    channelIds,
-    postText
-  );
+  // Build one post per channel. With per-platform sizing on (and no verbatim
+  // override), resolve each channel's service and size the copy to it.
+  const items: Array<{ channelId: string; text: string }> = [];
+  if (perPlatform && !postTextOverride) {
+    for (const channelId of channelIds) {
+      const service = await client.getChannelService(channelId);
+      const budget = platformCharBudget(service, baseBudget);
+      const text = await generate(budget);
+      core.info(
+        `channel ${channelId} (${service ?? 'unknown'}, ≤${budget}): ${text.length} chars`
+      );
+      items.push({ channelId, text });
+    }
+  } else {
+    const text = await generate(baseBudget);
+    core.info(`Generated post (${text.length} chars):\n${text}`);
+    for (const channelId of channelIds) items.push({ channelId, text });
+  }
+
+  // The primary post_text output is the first channel's copy.
+  core.setOutput('post_text', items[0]?.text ?? '');
+
+  const scheduleOpts: ScheduleOptions = { mode: scheduleMode, dueAt: dueAt || undefined };
+
+  if (dryRun) {
+    core.info(`dry_run=true — not calling Buffer (mode=${scheduleMode}).`);
+    core.setOutput('skipped', 'false');
+    core.setOutput('reason', 'Dry run: post generated but not enqueued.');
+    return;
+  }
+
+  core.info(`Enqueuing to ${items.length} channel(s) (mode=${scheduleMode})...`);
+  const results: BufferPostResult[] = await client.enqueueMany(items, scheduleOpts);
   core.setOutput('results', JSON.stringify(results));
 
   const succeeded = results.filter((r) => r.ok);

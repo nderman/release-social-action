@@ -2,10 +2,25 @@ import {
   buildPrompt,
   clampToBudget,
   firstHighlight,
+  platformCharBudget,
   summarizeRelease,
   templateSummary
 } from '../src/summarizer';
 import { LlmProvider } from '../src/types';
+
+describe('platformCharBudget', () => {
+  it('maps known services to their budget', () => {
+    expect(platformCharBudget('twitter', 999)).toBe(280);
+    expect(platformCharBudget('linkedin', 999)).toBe(700);
+    expect(platformCharBudget('bluesky', 999)).toBe(300);
+  });
+
+  it('falls back for unknown or missing services', () => {
+    expect(platformCharBudget('myspace', 280)).toBe(280);
+    expect(platformCharBudget(null, 280)).toBe(280);
+    expect(platformCharBudget(undefined, 411)).toBe(411);
+  });
+});
 
 describe('buildPrompt', () => {
   it('includes title, url, budget and notes', () => {

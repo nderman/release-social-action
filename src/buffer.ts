@@ -2,10 +2,12 @@
 // request per channel. Knows nothing about LLMs or release semantics. Resilience
 // and transport are injected (RateLimiter + HttpClient), so this is fully testable.
 //
-// Schema verified against https://developers.buffer.com/guides/data-model.html :
-//   - createPost(input: {...}) returns a UNION; the success member is
-//     `PostActionSuccess { post { id text } }`.
-//   - input carries `schedulingType: automatic` and `mode: addToQueue` (enums).
+// Schema verified by live introspection of api.buffer.com/graphql:
+//   - createPost(input: CreatePostInput) returns a UNION; success member is
+//     `PostActionSuccess { post { id dueAt } }`, error member `MutationError`.
+//   - channelId: ChannelId!  text: String  schedulingType: SchedulingType
+//     (automatic|notification)  dueAt: DateTime  mode: ShareMode.
+//   - ShareMode = addToQueue|shareNow|shareNext|customScheduled|recommendedTime.
 // Rate limits (per API key): 100 requests / 15 min; 429 on exceed; the
 // `retryAfter` (seconds) is delivered as a GraphQL error *extension*.
 
@@ -20,13 +22,44 @@ import {
 
 export const BUFFER_GRAPHQL_ENDPOINT = 'https://api.buffer.com/graphql';
 
-// Enum values (`automatic`, `addToQueue`) are inlined as GraphQL enum literals.
-// Only the scalar values travel as typed variables, so we never depend on the
-// exact name of the input object type.
-export const CREATE_POST_MUTATION = `mutation CreatePost($channelId: ChannelId!, $text: String!) {
-  createPost(
-    input: { channelId: $channelId, text: $text, schedulingType: automatic, mode: addToQueue }
-  ) {
+/** Buffer ShareMode enum values (how the post enters the schedule). */
+export type ShareMode =
+  | 'addToQueue'
+  | 'shareNow'
+  | 'shareNext'
+  | 'customScheduled'
+  | 'recommendedTime';
+
+export const SHARE_MODES: ShareMode[] = [
+  'addToQueue',
+  'shareNow',
+  'shareNext',
+  'customScheduled',
+  'recommendedTime'
+];
+
+export interface ScheduleOptions {
+  /** How the post enters the channel schedule. Default `addToQueue`. */
+  mode?: ShareMode;
+  /** ISO-8601 timestamp; required when `mode === 'customScheduled'`. */
+  dueAt?: string;
+}
+
+// Permissive ISO-8601 with timezone (Z or ±hh:mm). We validate before inlining.
+const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+export interface CreatePostVariables {
+  channelId: string;
+  text: string;
+}
+
+// Enum/scalar literals (mode, schedulingType, dueAt) are inlined as GraphQL
+// literals; only channelId/text travel as typed variables, so user-supplied
+// text can never break out of its variable into the query. `mode` is validated
+// against SHARE_MODES and `dueAt` against ISO-8601 before inlining.
+function buildMutation(fields: string[]): string {
+  return `mutation CreatePost($channelId: ChannelId!, $text: String!) {
+  createPost(input: { ${fields.join(', ')} }) {
     __typename
     ... on PostActionSuccess {
       post {
@@ -39,20 +72,41 @@ export const CREATE_POST_MUTATION = `mutation CreatePost($channelId: ChannelId!,
     }
   }
 }`;
-
-export interface CreatePostVariables {
-  channelId: string;
-  text: string;
 }
+
+/** The default queue mutation (kept for reference/tests). */
+export const CREATE_POST_MUTATION = buildMutation([
+  'channelId: $channelId',
+  'text: $text',
+  'schedulingType: automatic',
+  'mode: addToQueue'
+]);
 
 export function buildCreatePostBody(
   channelId: string,
-  text: string
+  text: string,
+  opts: ScheduleOptions = {}
 ): { query: string; variables: CreatePostVariables } {
-  return {
-    query: CREATE_POST_MUTATION,
-    variables: { channelId, text }
-  };
+  const mode: ShareMode = opts.mode ?? 'addToQueue';
+  if (!SHARE_MODES.includes(mode)) {
+    throw new Error(`Invalid schedule mode: ${mode}`);
+  }
+  const fields = [
+    'channelId: $channelId',
+    'text: $text',
+    'schedulingType: automatic',
+    `mode: ${mode}`
+  ];
+  if (mode === 'customScheduled') {
+    if (!opts.dueAt) {
+      throw new Error('due_at is required when schedule_mode=customScheduled');
+    }
+    if (!ISO_8601.test(opts.dueAt)) {
+      throw new Error(`due_at must be an ISO-8601 timestamp, got: ${opts.dueAt}`);
+    }
+    fields.push(`dueAt: "${opts.dueAt}"`);
+  }
+  return { query: buildMutation(fields), variables: { channelId, text } };
 }
 
 export interface BufferClientOptions {
@@ -124,25 +178,38 @@ export class BufferClient {
     this.retry = opts.retry;
   }
 
-  /** Enqueue `text` to every channel. One bad channel never aborts the rest. */
+  /** Enqueue the same `text` to every channel. One failure never aborts the rest. */
   async enqueueToChannels(
     channelIds: string[],
-    text: string
+    text: string,
+    opts: ScheduleOptions = {}
+  ): Promise<BufferPostResult[]> {
+    return this.enqueueMany(
+      channelIds.map((channelId) => ({ channelId, text })),
+      opts
+    );
+  }
+
+  /** Enqueue per-channel text (used for per-platform variants). */
+  async enqueueMany(
+    items: Array<{ channelId: string; text: string }>,
+    opts: ScheduleOptions = {}
   ): Promise<BufferPostResult[]> {
     const results: BufferPostResult[] = [];
-    for (const channelId of channelIds) {
-      results.push(await this.enqueueToChannel(channelId, text));
+    for (const item of items) {
+      results.push(await this.enqueueToChannel(item.channelId, item.text, opts));
     }
     return results;
   }
 
   async enqueueToChannel(
     channelId: string,
-    text: string
+    text: string,
+    opts: ScheduleOptions = {}
   ): Promise<BufferPostResult> {
     try {
       const res = await this.limiter.schedule(() =>
-        withRetry(() => this.post(channelId, text), this.retry)
+        withRetry(() => this.post(channelId, text, opts), this.retry)
       );
       return this.normalize(channelId, res);
     } catch (err) {
@@ -154,8 +221,43 @@ export class BufferClient {
     }
   }
 
-  private async post(channelId: string, text: string): Promise<HttpResponse> {
-    const body = buildCreatePostBody(channelId, text);
+  /**
+   * Best-effort: resolve a channel's platform (linkedin, twitter, ...) so the
+   * caller can size/tailor the post per network. Fail-open — returns null on any
+   * error so per-platform sizing never blocks posting.
+   */
+  async getChannelService(channelId: string): Promise<string | null> {
+    try {
+      const res = await this.limiter.schedule(() =>
+        withRetry(
+          () =>
+            this.gql(
+              'query Channel($input: ChannelInput!) { channel(input: $input) { id service } }',
+              { input: { id: channelId } }
+            ),
+          this.retry
+        )
+      );
+      const body = res.body as
+        | { data?: { channel?: { service?: string } | null } }
+        | undefined;
+      return body?.data?.channel?.service ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async post(
+    channelId: string,
+    text: string,
+    opts: ScheduleOptions
+  ): Promise<HttpResponse> {
+    const body = buildCreatePostBody(channelId, text, opts);
+    return this.gql(body.query, body.variables);
+  }
+
+  /** Single GraphQL POST: sends, feeds rate-limit headers back, flags retryables. */
+  private async gql(query: string, variables: object): Promise<HttpResponse> {
     const res = await this.http({
       url: this.endpoint,
       method: 'POST',
@@ -164,7 +266,7 @@ export class BufferClient {
         'Content-Type': 'application/json',
         Accept: 'application/json'
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ query, variables })
     });
 
     // Feed the server's RateLimit-* headers back into the pacer so it

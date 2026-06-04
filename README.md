@@ -31,6 +31,14 @@ the Buffer client takes its transport and rate-limiter by injection.
   exponential backoff + jitter on `429`/`5xx`, honoring `Retry-After`.
 - **No legacy REST** — all Buffer traffic is GraphQL over HTTPS via native
   `fetch`.
+- **Per-platform sizing** (`per_platform: true`) — resolves each channel's
+  network via Buffer's `channel` query and sizes the copy to it (X 280,
+  LinkedIn 700, Instagram 2200, …).
+- **Scheduling modes** (`schedule_mode`) — `addToQueue` (next free slot,
+  default), `shareNow`, `shareNext`, `recommendedTime`, or `customScheduled`
+  with an explicit `due_at`.
+- **Hand-crafted copy** (`post_text`) — supply exact post text verbatim,
+  bypassing the summarizer.
 
 ## Usage
 
@@ -61,10 +69,14 @@ jobs:
 | ------------------- | -------- | ---------------- | ------------------------------------------------------ |
 | `buffer_api_key`    | yes      | —                | Buffer API token (Bearer).                             |
 | `channel_ids`       | yes      | —                | Buffer channel IDs, comma- or newline-separated.       |
-| `openai_api_key`    | no\*     | —                | OpenAI key. \*One LLM key required.                    |
-| `anthropic_api_key` | no\*     | —                | Anthropic key. Preferred when both are set.            |
+| `openai_api_key`    | no       | —                | OpenAI key. Optional — falls back to a free template.  |
+| `anthropic_api_key` | no       | —                | Anthropic key. Preferred when both are set.            |
 | `llm_model`         | no       | per-provider     | Override the model id.                                 |
 | `char_budget`       | no       | `280`            | Max characters for the post.                           |
+| `per_platform`      | no       | `false`          | Size copy per channel network (X/LinkedIn/…).          |
+| `schedule_mode`     | no       | `addToQueue`     | `addToQueue`/`shareNow`/`shareNext`/`customScheduled`/`recommendedTime`. |
+| `due_at`            | no       | —                | ISO-8601 time; required for `customScheduled`.         |
+| `post_text`         | no       | —                | Exact copy, used verbatim (skips summarizer).          |
 | `major_only`        | no       | `true`           | Only post on `X.0.0` releases.                         |
 | `dry_run`           | no       | `false`          | Generate + log the post but skip Buffer.               |
 | `github_token`      | no       | `github.token`   | Token for reading release context.                     |

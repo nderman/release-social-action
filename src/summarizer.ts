@@ -49,6 +49,32 @@ export async function summarizeRelease(
   return clampToBudget(raw ?? '', req.charBudget);
 }
 
+// Per-platform character budgets (a sane announce length, not the raw platform
+// max). Keyed by Buffer's Service enum. Unknown services fall back to the
+// caller's global budget. Used when per_platform sizing is enabled.
+export const PLATFORM_CHAR_BUDGETS: Record<string, number> = {
+  twitter: 280,
+  bluesky: 300,
+  mastodon: 500,
+  threads: 500,
+  pinterest: 500,
+  linkedin: 700,
+  facebook: 700,
+  startPage: 700,
+  youtube: 1000,
+  googlebusiness: 1500,
+  instagram: 2200,
+  tiktok: 2200
+};
+
+export function platformCharBudget(
+  service: string | null | undefined,
+  fallback: number
+): number {
+  if (!service) return fallback;
+  return PLATFORM_CHAR_BUDGETS[service] ?? fallback;
+}
+
 /** First meaningful line of the notes, stripped of markdown noise. */
 export function firstHighlight(notes: string): string {
   for (const raw of notes.split(/\r?\n/)) {

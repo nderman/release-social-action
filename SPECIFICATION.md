@@ -221,6 +221,10 @@ header).
 | `anthropic_api_key`| no\*     | —            | Anthropic API key. Preferred when both are supplied.              |
 | `llm_model`        | no       | provider def | Override model id.                                                |
 | `char_budget`      | no       | `280`        | Max characters for the generated post.                            |
+| `per_platform`     | no       | `false`      | Resolve each channel's network and size copy per platform.        |
+| `schedule_mode`    | no       | `addToQueue` | `ShareMode`: addToQueue / shareNow / shareNext / customScheduled / recommendedTime. |
+| `due_at`           | no       | —            | ISO-8601 timestamp; required when `schedule_mode=customScheduled`.|
+| `post_text`        | no       | —            | Verbatim post copy; bypasses the summarizer.                      |
 | `major_only`       | no       | `true`       | Only post on `X.0.0` major releases.                              |
 | `dry_run`          | no       | `false`      | Generate the post and log it, but do **not** call Buffer.         |
 | `github_token`     | no       | `github.token`| Token used to enrich/fetch release context if needed.            |

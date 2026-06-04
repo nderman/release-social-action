@@ -52,6 +52,87 @@ describe('buildCreatePostBody', () => {
   });
 });
 
+describe('buildCreatePostBody scheduling modes', () => {
+  it('defaults to addToQueue with no dueAt', () => {
+    const { query } = buildCreatePostBody('c', 't');
+    expect(query).toContain('mode: addToQueue');
+    expect(query).not.toContain('dueAt:');
+  });
+
+  it('inlines a validated dueAt for customScheduled', () => {
+    const { query } = buildCreatePostBody('c', 't', {
+      mode: 'customScheduled',
+      dueAt: '2026-03-10T15:00:00.000Z'
+    });
+    expect(query).toContain('mode: customScheduled');
+    expect(query).toContain('dueAt: "2026-03-10T15:00:00.000Z"');
+  });
+
+  it('requires dueAt when customScheduled', () => {
+    expect(() => buildCreatePostBody('c', 't', { mode: 'customScheduled' })).toThrow(
+      /due_at is required/
+    );
+  });
+
+  it('rejects a malformed dueAt', () => {
+    expect(() =>
+      buildCreatePostBody('c', 't', { mode: 'customScheduled', dueAt: 'next tuesday' })
+    ).toThrow(/ISO-8601/);
+  });
+
+  it('rejects an unknown share mode', () => {
+    // @ts-expect-error intentionally invalid
+    expect(() => buildCreatePostBody('c', 't', { mode: 'whenever' })).toThrow(
+      /Invalid schedule mode/
+    );
+  });
+
+  it('supports shareNow (no dueAt needed)', () => {
+    const { query } = buildCreatePostBody('c', 't', { mode: 'shareNow' });
+    expect(query).toContain('mode: shareNow');
+    expect(query).not.toContain('dueAt:');
+  });
+});
+
+describe('BufferClient.getChannelService', () => {
+  it('returns the resolved service', async () => {
+    const http: HttpClient = async (req) => {
+      expect(req.body).toContain('channel(input: $input)');
+      return { status: 200, headers: {}, body: { data: { channel: { id: 'c', service: 'linkedin' } } } };
+    };
+    const client = new BufferClient({ apiKey: 'k', http, limiter: fastLimiter() });
+    expect(await client.getChannelService('c')).toBe('linkedin');
+  });
+
+  it('fails open to null on error', async () => {
+    const http: HttpClient = async () => ({
+      status: 200,
+      headers: {},
+      body: { errors: [{ message: 'nope' }] }
+    });
+    const client = new BufferClient({ apiKey: 'k', http, limiter: fastLimiter() });
+    expect(await client.getChannelService('c')).toBeNull();
+  });
+});
+
+describe('BufferClient.enqueueMany (per-channel text)', () => {
+  it('sends each channel its own text', async () => {
+    const seen: Record<string, string> = {};
+    const http: HttpClient = async (req) => {
+      const v = JSON.parse(req.body!).variables;
+      seen[v.channelId] = v.text;
+      return { status: 200, headers: {}, body: { data: { createPost: { __typename: 'PostActionSuccess', post: { id: `p-${v.channelId}` } } } } };
+    };
+    const client = new BufferClient({ apiKey: 'k', http, limiter: fastLimiter() });
+    const results = await client.enqueueMany([
+      { channelId: 'li', text: 'long LinkedIn copy' },
+      { channelId: 'x', text: 'short' }
+    ]);
+    expect(seen).toEqual({ li: 'long LinkedIn copy', x: 'short' });
+    expect(results.every((r) => r.ok)).toBe(true);
+  });
+});
+
 describe('BufferClient', () => {
   it('sends a Bearer token and JSON content type', async () => {
     const captured: HttpRequest[] = [];
