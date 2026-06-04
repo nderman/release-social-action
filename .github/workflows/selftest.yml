@@ -31,6 +31,9 @@ jobs:
           channel_ids: ${{ secrets.BUFFER_CHANNEL_IDS }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          # Optional hand-crafted copy; empty → auto-generate from release notes.
+          post_text: ${{ vars.LAUNCH_POST_TEXT }}
+          schedule_mode: ${{ vars.SCHEDULE_MODE || 'addToQueue' }}
           dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || vars.DRY_RUN || 'false' }}
 
       - name: Summary
