@@ -1,0 +1,38 @@
+{
+  "name": "release-social-action",
+  "version": "1.0.0",
+  "description": "GitHub Action that detects major releases, summarizes them with an LLM, and schedules social posts via the Buffer GraphQL API.",
+  "main": "dist/index.js",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "ncc build src/main.ts -o dist --minify",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "all": "npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.0"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": "*",
+    "openai": "*"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": { "optional": true },
+    "openai": { "optional": true }
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.14.0",
+    "@vercel/ncc": "^0.38.3",
+    "jest": "^29.7.0",
+    "openai": "^4.73.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.6.3"
+  }
+}

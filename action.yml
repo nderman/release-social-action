@@ -1,0 +1,58 @@
+name: 'Release Social Scheduler'
+description: 'Detect major releases, summarize the notes with an LLM, and schedule social posts via the Buffer GraphQL API.'
+author: 'release-social-action'
+branding:
+  icon: 'send'
+  color: 'blue'
+
+inputs:
+  buffer_api_key:
+    description: 'Buffer API access token (used as a Bearer credential against the Buffer GraphQL API).'
+    required: true
+  channel_ids:
+    description: 'Buffer channel IDs to enqueue to. Comma- or newline-separated.'
+    required: true
+  openai_api_key:
+    description: 'OpenAI API key. One of openai_api_key / anthropic_api_key is required.'
+    required: false
+    default: ''
+  anthropic_api_key:
+    description: 'Anthropic API key. Preferred when both providers are supplied.'
+    required: false
+    default: ''
+  llm_model:
+    description: 'Override the LLM model id. Defaults to a sensible model per provider.'
+    required: false
+    default: ''
+  char_budget:
+    description: 'Maximum number of characters for the generated post.'
+    required: false
+    default: '280'
+  major_only:
+    description: 'Only post on major (X.0.0) releases.'
+    required: false
+    default: 'true'
+  dry_run:
+    description: 'Generate and log the post but do not call the Buffer API.'
+    required: false
+    default: 'false'
+  github_token:
+    description: 'GitHub token used to read release context when needed.'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  posted:
+    description: "'true' if any post was enqueued to Buffer."
+  skipped:
+    description: "'true' if the release was skipped (e.g. not a major release)."
+  reason:
+    description: 'Human-readable skip reason or success summary.'
+  post_text:
+    description: 'The generated social post text.'
+  results:
+    description: 'JSON array of per-channel Buffer post results.'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

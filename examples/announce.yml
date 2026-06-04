@@ -1,0 +1,30 @@
+# Example consumer workflow. Copy into a repo that uses this Action.
+name: Announce major release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Schedule social posts
+        uses: your-org/release-social-action@v1
+        id: social
+        with:
+          buffer_api_key: ${{ secrets.BUFFER_API_KEY }}
+          channel_ids: ${{ vars.BUFFER_CHANNEL_IDS }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          major_only: 'true'
+          char_budget: '280'
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "posted=${{ steps.social.outputs.posted }}"
+          echo "skipped=${{ steps.social.outputs.skipped }}"
+          echo "reason=${{ steps.social.outputs.reason }}"

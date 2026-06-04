@@ -1,0 +1,7 @@
+node_modules/
+lib/
+coverage/
+*.log
+.env
+.DS_Store
+# dist/ is intentionally committed (GitHub Actions runs the bundled output).

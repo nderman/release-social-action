@@ -1,0 +1,49 @@
+# Live self-test: runs THIS repo's action (from ./) when a release is published.
+# Configure these in repo Settings → Secrets and variables → Actions:
+#   secrets: BUFFER_API_KEY, BUFFER_CHANNEL_IDS, ANTHROPIC_API_KEY (or OPENAI_API_KEY)
+#   (optional) variable DRY_RUN = "true" to rehearse without calling Buffer.
+name: Self test
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run without calling Buffer'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the action
+        id: social
+        uses: ./
+        with:
+          buffer_api_key: ${{ secrets.BUFFER_API_KEY }}
+          channel_ids: ${{ secrets.BUFFER_CHANNEL_IDS }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || vars.DRY_RUN || 'false' }}
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Release Social Scheduler"
+            echo ""
+            echo "- posted: \`${{ steps.social.outputs.posted }}\`"
+            echo "- skipped: \`${{ steps.social.outputs.skipped }}\`"
+            echo "- reason: ${{ steps.social.outputs.reason }}"
+            echo ""
+            echo "**Generated post:**"
+            echo ""
+            echo '${{ steps.social.outputs.post_text }}'
+          } >> "$GITHUB_STEP_SUMMARY"
